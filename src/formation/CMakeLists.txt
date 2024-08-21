@@ -27,6 +27,10 @@ add_executable(cross_node src/cross_node.cpp)
 ament_target_dependencies(cross_node rclcpp px4_msgs px4_ros_com)
 install(TARGETS cross_node DESTINATION lib/${PROJECT_NAME})
 
+add_executable(serial_mapping_node src/serial_mapping/serial_mapping.cpp)
+# ament_target_dependencies(serial_mapping_node rclcpp)
+install(TARGETS serial_mapping_node DESTINATION lib/${PROJECT_NAME})
+
 # Install launch files.
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}/)
 
