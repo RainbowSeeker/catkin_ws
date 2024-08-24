@@ -8,7 +8,7 @@
 #include <iostream>
 #include <thread>
 #include <memory>
-
+#include <filesystem>
 
 class SerialDevice
 {
@@ -217,7 +217,6 @@ public:
             int len = _serial->read(buf, sizeof(buf));
             if (len > 0)
             {
-                // std::cout << "Received " << len << " bytes from serial" << std::endl;
                 _udp->write(buf, len);
             }
         }
@@ -253,10 +252,43 @@ private:
 
 
 int main(int argc, const char** argv) {
-    (void)argc;
-    (void)argv;
 
-    SerialMapping mapping("/dev/serial/by-id/usb-CUAV_PX4_CUAV_X7Pro_0-if00", 2000000, "localhost", 8888);
-    mapping.run();
+    std::string dst_ip = "localhost";
+    std::string dst_port = "14550";
+    if (argc > 2) {
+        dst_ip = argv[1];
+        dst_port = argv[2];
+    }
+
+    const std::string serial_dir = "/dev/serial/by-id/";
+    const std::string serial_prefix = "usb-CUAV_PX4";
+    std::string serial_filename;
+
+    try {
+        bool found = false;
+        for (const auto & entry : std::filesystem::directory_iterator(serial_dir))
+        {
+            serial_filename = entry.path().string();
+            if (serial_filename.find(serial_prefix) != std::string::npos)
+            {
+                std::cout << "Found matching device: " << serial_filename << std::endl;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            throw std::runtime_error("No matching serial device found");
+        }
+
+        SerialMapping mapping(serial_filename.c_str(), 2000000, dst_ip.c_str(), std::stoi(dst_port));
+        mapping.run();
+
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
+    
     return 0;
 }

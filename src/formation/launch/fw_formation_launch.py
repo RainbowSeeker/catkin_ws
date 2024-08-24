@@ -12,13 +12,14 @@ def generate_launch_description():
         node.append(
             Node(
                 package='formation',
-                executable='formation_node',
+                executable='fw_formation_control_node',
                 output='screen',
                 shell=True,
                 arguments=['amc_' + str(i + 1)],
             )
         )
-        
+    
+    for i in range(3):
         px4_workdir = os.path.expanduser('~') + '/PX4-Autopilot'
         px4_env = { 'PX4_SYS_AUTOSTART': '4003', 
                     'PX4_GZ_MODEL': 'rc_cessna', 
@@ -36,12 +37,12 @@ def generate_launch_description():
             )
         )
 
-    cross_node = Node(
-                    package='formation',
-                    executable='cross_node',
-                    output='screen',
-                    shell=True
-                )
+    # cross_node = Node(
+    #                 package='formation',
+    #                 executable='cross_node',
+    #                 output='screen',
+    #                 shell=True
+    #             )
 
     return LaunchDescription([
         node[0], px4_client[0],

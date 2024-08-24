@@ -1,11 +1,11 @@
-#include <formation/formation_node.hpp>
+#include "fw_formation_control.hpp"
 
 #define M_DEG_TO_RAD 		0.017453292519943295
 #define M_RAD_TO_DEG 		57.295779513082323
 
 namespace formation {
 
-FormationNode::FormationNode(const std::string& node_name, 
+FixedwingFormationControl::FixedwingFormationControl(const std::string& node_name, 
                             std::chrono::milliseconds callback_period)
     : Node(node_name)
 {
@@ -81,13 +81,13 @@ FormationNode::FormationNode(const std::string& node_name,
     }
     
     RCLCPP_INFO(this->get_logger(), "Formation node for %s started.", topic_ns.c_str());
-    _timer = this->create_wall_timer(callback_period, std::bind(&FormationNode::timer_callback, this));
+    _timer = this->create_wall_timer(callback_period, std::bind(&FixedwingFormationControl::timer_callback, this));
 }
 
-FormationNode::~FormationNode() {
+FixedwingFormationControl::~FixedwingFormationControl() {
 }
 
-void FormationNode::timer_callback() {
+void FixedwingFormationControl::timer_callback() {
     // update pilot command & mission data
 	pilot_cmd_decode();
 	mission_decompose();
@@ -110,7 +110,7 @@ void FormationNode::timer_callback() {
 	}
 }
 
-void FormationNode::parameters_update() {
+void FixedwingFormationControl::parameters_update() {
     // FMS parameters
 	CONTROL_PARAM.FW_ARSP_MODE = 0;
 	CONTROL_PARAM.FW_AIRSPD_MAX = 20.f;
@@ -178,7 +178,7 @@ void FormationNode::parameters_update() {
 	}
 }
 
-bool FormationNode::formation_preprocess() {
+bool FixedwingFormationControl::formation_preprocess() {
     // check list 1: is flying
     bool is_flying = (_vehicle_status.arming_state == px4_msgs::msg::VehicleStatus::ARMING_STATE_ARMED) &&
             (_vehicle_status.nav_state > px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_MANUAL);
@@ -222,7 +222,7 @@ bool FormationNode::formation_preprocess() {
 	return true;
 }
 
-void FormationNode::formation_step() {
+void FixedwingFormationControl::formation_step() {
     parameters_update();
 	/* Run attitude controllers */
 	fms_step();
@@ -232,7 +232,7 @@ void FormationNode::formation_step() {
 	data_save();
 }
 
-void FormationNode::publish_attitude_setpoint(float roll, float pitch, float yaw, float thrust) {
+void FixedwingFormationControl::publish_attitude_setpoint(float roll, float pitch, float yaw, float thrust) {
     px4_msgs::msg::OffboardControlMode ocm{};
 	ocm.attitude = true;
 	ocm.body_rate = false;
@@ -248,7 +248,7 @@ void FormationNode::publish_attitude_setpoint(float roll, float pitch, float yaw
 	_att_sp_pub->publish(attitude_setpoint);
 }
 
-void FormationNode::fms_step() {
+void FixedwingFormationControl::fms_step() {
     // INS_Out
 	_fms_in.INS_Out.timestamp = _local_pos.timestamp;
 	_fms_in.INS_Out.x_R = _local_pos.x;
@@ -341,10 +341,10 @@ void FormationNode::fms_step() {
 	}
 }
 
-void FormationNode::data_save() {
+void FixedwingFormationControl::data_save() {
 }
 
-void FormationNode::mission_decompose() {
+void FixedwingFormationControl::mission_decompose() {
     switch (_fms_out.FMS_Out.state)
 	{
 	case VehicleState_FormHold:
@@ -391,7 +391,7 @@ void FormationNode::mission_decompose() {
 	}
 }
 
-void FormationNode::pilot_cmd_decode() {
+void FixedwingFormationControl::pilot_cmd_decode() {
     if (_test_phase == PHASE_FORMATION)
 	{
 		if (running_time < 5min)
@@ -419,7 +419,7 @@ int main(int argc, const char** argv) {
 
     rclcpp::init(argc, argv);
     
-    rclcpp::spin(std::make_shared<formation::FormationNode>(argv[1], 40ms));
+    rclcpp::spin(std::make_shared<formation::FixedwingFormationControl>(argv[1], 40ms));
 
     rclcpp::shutdown();
     return 0;

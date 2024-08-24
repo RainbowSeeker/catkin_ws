@@ -47,12 +47,12 @@ T constrain(T value, T min_value, T max_value) {
 
 namespace formation {
 
-class FormationNode : public rclcpp::Node {
+class FixedwingFormationControl : public rclcpp::Node {
 public:
-    explicit FormationNode(const std::string& node_name, 
+    explicit FixedwingFormationControl(const std::string& node_name, 
                             std::chrono::milliseconds callback_period = 20ms);
 
-    ~FormationNode();
+    ~FixedwingFormationControl();
 
 private:
     inline uint64_t absolute_time() {

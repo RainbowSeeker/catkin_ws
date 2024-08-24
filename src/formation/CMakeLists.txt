@@ -13,34 +13,18 @@ find_package(px4_msgs REQUIRED)
 find_package(px4_ros_com REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(form_msgs REQUIRED)
 
-include_directories(include model)
+include_directories(
+  include
+  ${EIGEN3_INCLUDE_DIR}
+)
 
-add_subdirectory(model)
-
-add_executable(formation_node src/formation_node.cpp)
-target_link_libraries(formation_node FMS Eigen3::Eigen)
-ament_target_dependencies(formation_node rclcpp px4_msgs px4_ros_com)
-install(TARGETS formation_node DESTINATION lib/${PROJECT_NAME})
-
-add_executable(cross_node src/cross_node.cpp)
-ament_target_dependencies(cross_node rclcpp px4_msgs px4_ros_com)
-install(TARGETS cross_node DESTINATION lib/${PROJECT_NAME})
-
-add_executable(serial_mapping_node src/serial_mapping/serial_mapping.cpp)
-# ament_target_dependencies(serial_mapping_node rclcpp)
-install(TARGETS serial_mapping_node DESTINATION lib/${PROJECT_NAME})
+# add_subdirectory(lib/param)
+add_subdirectory(src)
 
 # Install launch files.
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}/)
-
-
-set(TEST false)
-if (TEST)
-  add_executable(test_node src/test.cpp)
-  ament_target_dependencies(test_node rclcpp px4_msgs px4_ros_com)
-  install(TARGETS test_node DESTINATION lib/${PROJECT_NAME})
-endif ()
 
 
 if(BUILD_TESTING)
