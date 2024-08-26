@@ -8,5 +8,3 @@ float32 param1			# Parameter 1, as defined by MAVLink uint16 VEHICLE_CMD enum.
 float32 param2			# Parameter 2, as defined by MAVLink uint16 VEHICLE_CMD enum.
 float32 param3			# Parameter 3, as defined by MAVLink uint16 VEHICLE_CMD enum.
 uint16 command			# Command ID
-uint8 target_sysem		# System which should execute the command
-uint8 source_systemt		# System sending the command

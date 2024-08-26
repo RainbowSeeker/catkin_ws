@@ -1,7 +1,7 @@
 import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
 from launch.substitutions import LaunchConfiguration, TextSubstitution
 
 def generate_launch_description():
@@ -15,7 +15,6 @@ def generate_launch_description():
                 )
     
     node = []
-    px4_client = []
     for i in range(3):
         node.append(
             Node(
@@ -26,7 +25,9 @@ def generate_launch_description():
                 arguments=['amc_' + str(i + 1)],
             )
         )
-    
+    delay_amc = TimerAction(period=10.0, actions=[node[0], node[1], node[2]])
+
+    px4_client = []
     for i in range(3):
         px4_workdir = os.path.expanduser('~') + '/PX4-Autopilot'
         px4_env = { 'PX4_SYS_AUTOSTART': '4001', 
@@ -47,7 +48,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         # dds_agent,
-        node[0], px4_client[0],
-        node[1], px4_client[1],
-        node[2], px4_client[2],
+        px4_client[0], px4_client[1], px4_client[2],
+        delay_amc
     ])

@@ -22,7 +22,7 @@
 #define PHASE_SINGLE	0
 #define PHASE_FORMATION	1
 #define PHASE_UNVALID	-1
-#define PHASE_DEFAULT	PHASE_FORMATION
+#define PHASE_DEFAULT	PHASE_SINGLE
 
 #define ROS_ZERO_TIME   0, 0, RCL_ROS_TIME
 
@@ -43,8 +43,16 @@ private:
     void timer_callback();
 	bool formation_preprocess();
 	void formation_step();
-	void publish_trajectory_setpoint(float velocity[3], float yawspeed);
 	void fms_step();
+    void formation_enter();
+    void formation_exit();
+    void publish_vehicle_command(uint16_t command, float param1, float param2 = NAN, float param3 = NAN, float param4 = NAN, float param5 = NAN, float param6 = NAN, float param7 = NAN);
+	void publish_trajectory_setpoint(float velocity[3], float yawspeed);
+    void handle_command(const form_msgs::msg::UavCommand::SharedPtr msg);
+
+    inline bool uav_is_active() {
+        return get_clock()->now() - _last_fmuout_time < 500ms;
+    }
 
     rclcpp::TimerBase::SharedPtr _timer;
 
@@ -53,7 +61,8 @@ private:
     rclcpp::Subscription<px4_msgs::msg::VehicleAttitude>::SharedPtr         _att_sub;
     rclcpp::Subscription<px4_msgs::msg::VehicleStatus>::SharedPtr           _vehicle_status_sub;
     rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr    _form_pos_sub[3];
-    rclcpp::Subscription<form_msgs::msg::UavCommand>::SharedPtr             _command_sub[3];
+    // Formation command
+    rclcpp::Subscription<form_msgs::msg::UavCommand>::SharedPtr             _command_sub;
 
     // Publishers
     rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr         _trajectory_setpoint_pub;
@@ -82,20 +91,29 @@ private:
     // control_toolbox
     control_toolbox::Pid _hgt_ctrl {_param_hgt_kp.as_double(), _param_hgt_ki.as_double(), 0.0, 0.0, -0.0};
 
-
     px4_msgs::msg::FormationCross		_formation_cross{};
     px4_msgs::msg::VehicleLocalPosition _local_pos{};
 	px4_msgs::msg::VehicleAttitude	    _att{};
     px4_msgs::msg::VehicleStatus	    _vehicle_status{};
+    form_msgs::msg::UavCommand          _command{};
 
-    int32_t _test_phase{PHASE_DEFAULT};	// determine the running type of uavs. 0: single, 1: formation
+    int     _test_phase{PHASE_DEFAULT};	// determine the running type of uavs. 0: single, 1: formation
 
+    // bool
+    bool    _stop{true};
+    bool    _is_emergency{false};
+
+    // Time
     rclcpp::Time _first_ready_time{ROS_ZERO_TIME};
+    rclcpp::Time _last_fmuout_time{ROS_ZERO_TIME};
+    rclcpp::Time _last_cross_time[3]{{ROS_ZERO_TIME}, {ROS_ZERO_TIME}, {ROS_ZERO_TIME}};
     uint64_t _control_interval; // [ns]
 
-    int _uav_id{0};
-	rclcpp::Duration running_time{0, 0};
+    // Duration
+	rclcpp::Duration _running_time{0, 0};
 
+    // Formation Related
+    int _uav_id{0};
     struct {
         float velocity[3];
         float yawspeed;
