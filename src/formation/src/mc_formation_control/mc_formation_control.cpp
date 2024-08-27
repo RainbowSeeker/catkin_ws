@@ -1,5 +1,6 @@
 #include "mc_formation_control.hpp"
 #include "formation/utils.hpp"
+#include "px4_ros_com/frame_transforms.h"
 
 #include <Eigen/Eigen>
 #include <Eigen/Geometry>
@@ -11,9 +12,11 @@ namespace formation {
 MulticopterFormationControl::MulticopterFormationControl(const std::string& node_name, std::chrono::milliseconds control_period) : 
     Node(node_name), _control_interval(control_period / 1ms * 1e6) // [ns]
 {
+    parameters_declare();
+
     std::string topic_ns{""};
 
-    if (_test_phase == PHASE_FORMATION && std::isdigit(node_name.back())) {
+    if (std::isdigit(node_name.back())) {
         topic_ns = '/' + std::string("px4_")+ node_name.back();
         _uav_id = node_name.back() - '1';
 
@@ -34,7 +37,9 @@ MulticopterFormationControl::MulticopterFormationControl(const std::string& node
     _att_sub = this->create_subscription<px4_msgs::msg::VehicleAttitude>(
         topic_ns + "/fmu/out/vehicle_attitude", qos,
         [this](const px4_msgs::msg::VehicleAttitude::SharedPtr msg) {
+            using namespace px4_ros_com::frame_transforms::utils::quaternion;
             _att = *msg;
+            _yaw = quaternion_get_yaw(array_to_eigen_quat(_att.q));
         });
 
     _vehicle_status_sub = this->create_subscription<px4_msgs::msg::VehicleStatus>(
@@ -53,6 +58,8 @@ MulticopterFormationControl::MulticopterFormationControl(const std::string& node
         topic_ns + "/fmu/in/vehicle_command", 10);
         
     // Subscribe formation cross
+    _test_phase = _param_test_phase.as_string() == "formation" ? PHASE_FORMATION : PHASE_SINGLE;
+
     if (_test_phase == PHASE_FORMATION)
     {
         for (int i = 0; i < 3; i++)
@@ -75,10 +82,8 @@ MulticopterFormationControl::MulticopterFormationControl(const std::string& node
     _command_sub = this->create_subscription<form_msgs::msg::UavCommand>(
         topic_ns + "/fmu/in/uav_command", qos,
         std::bind(&MulticopterFormationControl::handle_command, this, std::placeholders::_1));
-    
-    parameters_declare();
-    
-    RCLCPP_INFO(this->get_logger(), "Formation node for %s started.", topic_ns.c_str());
+
+    RCLCPP_INFO(this->get_logger(), "Formation node for %s started. Phase: %s", topic_ns.c_str(), _param_test_phase.as_string().c_str());
     _timer = this->create_wall_timer(control_period, std::bind(&MulticopterFormationControl::timer_callback, this));
 }
 
@@ -200,7 +205,7 @@ void MulticopterFormationControl::formation_step()
 	/* Run attitude controllers */
 	fms_step();
 	/* Publish the attitude setpoint for analysis once available */
-	publish_trajectory_setpoint(_fms_out.velocity, _fms_out.yawspeed);
+	publish_trajectory_setpoint(_fms_out.velocity, _fms_out.yaw);
 }
 
 void MulticopterFormationControl::fms_step() 
@@ -211,11 +216,25 @@ void MulticopterFormationControl::fms_step()
     // height hold
     double vh_cmd = _hgt_ctrl.computeCommand(_param_hgt_sp.as_double() + _local_pos.z, dt);
 
+    // yaw hold
+    const double yaw_cmd = math::radians(_param_yaw_sp.as_double());
+
     // formation control
     Vector3d pos_err{0, 0, 0};
-    Vector3d vel_sp {1.0, 0, -vh_cmd};
+    Vector3d vel_sp {1.0, 0, 0};
 
-    if (_test_phase == PHASE_FORMATION)
+    if (_test_phase == PHASE_SINGLE)
+    {
+        // follow yaw.
+        Matrix3d Rz;
+        Rz << cos(_yaw), -sin(_yaw),  0,
+              sin(_yaw),  cos(_yaw),  0,
+              0,                  0,  1;
+
+        vel_sp = Rz * vel_sp;
+        vel_sp[2] += -vh_cmd;
+    }
+    else if (_test_phase == PHASE_FORMATION)
     {
         Matrix3d rel_x; 
         rel_x << 0.0, -20.0, -20.0, 
@@ -233,6 +252,7 @@ void MulticopterFormationControl::fms_step()
         }
         pos_err -= Vector3d{_local_pos.x, _local_pos.y, _local_pos.z};
         vel_sp += pos_err * 0.5;
+        vel_sp[2] += -vh_cmd;
     }
     
     // output limit
@@ -243,12 +263,12 @@ void MulticopterFormationControl::fms_step()
     _fms_out.velocity[0] = (float)vel_sp[0];
     _fms_out.velocity[1] = (float)vel_sp[1];
     _fms_out.velocity[2] = (float)vel_sp[2];
-    _fms_out.yawspeed = 0.0f;
+    _fms_out.yaw = (float)yaw_cmd;
     
     if (_test_phase == PHASE_SINGLE)
     {
         RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000,
-            "command vn: %f, ve: %f, vd: %f", vel_sp[0], vel_sp[1], vel_sp[2]);
+            "command vn: %f, ve: %f, vd: %f, yaw_cmd: %f deg", vel_sp[0], vel_sp[1], vel_sp[2], math::degrees(yaw_cmd));
     }
     else if (_test_phase == PHASE_FORMATION)
     {
@@ -277,7 +297,7 @@ void MulticopterFormationControl::publish_vehicle_command(uint16_t command, floa
     _vehicle_command_pub->publish(cmd);
 }
 
-void MulticopterFormationControl::publish_trajectory_setpoint(float velocity[3], float yawspeed) 
+void MulticopterFormationControl::publish_trajectory_setpoint(float velocity[3], float yaw) 
 {
     px4_msgs::msg::OffboardControlMode ocm{};
 	ocm.position = false;
@@ -292,7 +312,7 @@ void MulticopterFormationControl::publish_trajectory_setpoint(float velocity[3],
 	px4_msgs::msg::TrajectorySetpoint setpoint{};
     setpoint.position = {NAN, NAN, NAN};
     setpoint.velocity = {velocity[0], velocity[1], velocity[2]};
-    setpoint.yawspeed = yawspeed;
+    setpoint.yaw = yaw;
     setpoint.timestamp = absolute_time();
 	_trajectory_setpoint_pub->publish(setpoint);
 }

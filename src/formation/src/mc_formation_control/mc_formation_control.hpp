@@ -21,8 +21,6 @@
 
 #define PHASE_SINGLE	0
 #define PHASE_FORMATION	1
-#define PHASE_UNVALID	-1
-#define PHASE_DEFAULT	PHASE_SINGLE
 
 #define ROS_ZERO_TIME   0, 0, RCL_ROS_TIME
 
@@ -47,7 +45,7 @@ private:
     void formation_enter();
     void formation_exit();
     void publish_vehicle_command(uint16_t command, float param1, float param2 = NAN, float param3 = NAN, float param4 = NAN, float param5 = NAN, float param6 = NAN, float param7 = NAN);
-	void publish_trajectory_setpoint(float velocity[3], float yawspeed);
+	void publish_trajectory_setpoint(float velocity[3], float yaw);
     void handle_command(const form_msgs::msg::UavCommand::SharedPtr msg);
 
     inline bool uav_is_active() {
@@ -70,15 +68,19 @@ private:
     rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr             _vehicle_command_pub;
 
     // Parameters
-    rclcpp::Parameter      _param_hgt_sp{"mc_hgt_sp", 5.0};
-    rclcpp::Parameter      _param_hgt_kp{"mc_hgt_kp", 1.0};
-    rclcpp::Parameter      _param_hgt_ki{"mc_hgt_ki", 0.1};
+    rclcpp::Parameter      _param_test_phase{"test_phase", "single"};
+    rclcpp::Parameter      _param_hgt_sp{"mc_hgt_sp", 5.0}; // [m]
+    rclcpp::Parameter      _param_hgt_kp{"mc_hgt_kp", 0.5};
+    rclcpp::Parameter      _param_hgt_ki{"mc_hgt_ki", 0.05};
+    rclcpp::Parameter      _param_yaw_sp{"mc_yaw_sp", 0.0}; // [deg]
     
     inline void parameters_declare()
     {
+        ParameterManager::add_parameter(&_param_test_phase);
         ParameterManager::add_parameter(&_param_hgt_sp);
         ParameterManager::add_parameter(&_param_hgt_kp);
         ParameterManager::add_parameter(&_param_hgt_ki);
+        ParameterManager::add_parameter(&_param_yaw_sp);
         ParameterManager::attach(this).declare_parameters();
     }
 
@@ -96,8 +98,9 @@ private:
 	px4_msgs::msg::VehicleAttitude	    _att{};
     px4_msgs::msg::VehicleStatus	    _vehicle_status{};
     form_msgs::msg::UavCommand          _command{};
+    double _yaw{0.0}; // [rad]
 
-    int     _test_phase{PHASE_DEFAULT};	// determine the running type of uavs. 0: single, 1: formation
+    int     _test_phase{PHASE_SINGLE};	// determine the running type of uavs. 0: single, 1: formation
 
     // bool
     bool    _stop{true};
@@ -116,7 +119,7 @@ private:
     int _uav_id{0};
     struct {
         float velocity[3];
-        float yawspeed;
+        float yaw;
         uint64_t timestamp;
     } _fms_out;
 };

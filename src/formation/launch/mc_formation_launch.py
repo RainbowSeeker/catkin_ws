@@ -8,7 +8,7 @@ def generate_launch_description():
 
     dds_agent = ExecuteProcess(
                     cmd=[[
-                        'MicroXRCEAgent udp4 --port 8888',
+                        'lsof -i:8888 | grep \'MicroXRCE\' > /dev/null || MicroXRCEAgent udp4 --port 8888',
                     ]],
                     shell=True,
                     output='screen',
@@ -23,6 +23,7 @@ def generate_launch_description():
                 output='screen',
                 shell=True,
                 arguments=['amc_' + str(i + 1)],
+                parameters=[{'test_phase': 'formation'}] # 'test_phase': 'single' or 'formation'
             )
         )
     delay_amc = TimerAction(period=10.0, actions=[node[0], node[1], node[2]])
@@ -47,7 +48,7 @@ def generate_launch_description():
         )
 
     return LaunchDescription([
-        # dds_agent,
+        dds_agent,
         px4_client[0], px4_client[1], px4_client[2],
         delay_amc
     ])

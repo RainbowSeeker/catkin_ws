@@ -32,6 +32,11 @@ public:
             _node->declare_parameter(param.first, param.second->get_parameter_value());
         }
 
+        for (auto &param : _params)
+        {
+            *param.second = _node->get_parameter(param.first);
+        }
+
         auto param_change_callback = [this](const std::vector<rclcpp::Parameter> &params) {
             auto result = rcl_interfaces::msg::SetParametersResult();
             result.successful = true;
@@ -40,7 +45,6 @@ public:
                 auto it = _params.find(param.get_name());
                 if (it != _params.end())
                 {
-                    // _node->get_parameter(param.get_name(), *it->second);
                     *it->second = param;
                 }
             }
