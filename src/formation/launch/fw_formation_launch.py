@@ -1,13 +1,21 @@
 import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
 from launch.substitutions import LaunchConfiguration, TextSubstitution
 
 def generate_launch_description():
 
+    dds_agent = ExecuteProcess(
+                    cmd=[
+                        'pgrep MicroXRCEAgent > /dev/null || MicroXRCEAgent udp4 --port 8888',
+                    ],
+                    shell=True,
+                    output='screen',
+                    name='dds_agent',
+                )
+    
     node = []
-    px4_client = []
     for i in range(3):
         node.append(
             Node(
@@ -15,10 +23,13 @@ def generate_launch_description():
                 executable='fw_formation_control_node',
                 output='screen',
                 shell=True,
-                arguments=['amc_' + str(i + 1)],
+                arguments=[str(i + 1)],
+                parameters=[{'test_phase': 'formation'}] # 'test_phase': 'single' or 'formation'
             )
         )
+    delay_amc = TimerAction(period=10.0, actions=[*node])
     
+    px4_client = []
     for i in range(3):
         px4_workdir = os.path.expanduser('~') + '/PX4-Autopilot'
         px4_env = { 'PX4_SYS_AUTOSTART': '4003', 
@@ -37,21 +48,8 @@ def generate_launch_description():
             )
         )
 
-    # cross_node = Node(
-    #                 package='formation',
-    #                 executable='cross_node',
-    #                 output='screen',
-    #                 shell=True
-    #             )
-
     return LaunchDescription([
-        node[0], px4_client[0],
-        node[1], px4_client[1],
-        node[2], px4_client[2],
-        # px4_client[0], cross_node,
-        # px4_client[1],
-        # px4_client[2],
-        # node[0],
-        # node[1],
-        # node[2],
+        dds_agent,
+        *px4_client,
+        delay_amc,
     ])

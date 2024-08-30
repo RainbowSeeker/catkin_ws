@@ -6,35 +6,43 @@ from launch.substitutions import LaunchConfiguration, TextSubstitution
 
 def generate_launch_description():
 
-    amc_id = 1 # from 1 to 3
-    dds_conn_dev = '/dev/ttyS0'
-    gcs_ip = '192.168.1.111'
+    # declare launch arguments
+    args = [DeclareLaunchArgument('amc_id', default_value='1', description='AMC ID'), 
+            DeclareLaunchArgument('test_phase', default_value='single', description='test phase'),
+            DeclareLaunchArgument('lasting_time', default_value='30', description='fly lasting time'),
+            DeclareLaunchArgument('dds_baudrate', default_value='2000000', description='DDS baudrate'),
+            DeclareLaunchArgument('gcs_ip', default_value='127.0.0.1', description='target GCS IP address')]
 
+    dds_agent = ExecuteProcess(
+                    cmd=[
+                        'pgrep MicroXRCEAgent > /dev/null || MicroXRCEAgent serial --dev /dev/ttyS0 --baudrate', 
+                        LaunchConfiguration('dds_baudrate')
+                    ],
+                    shell=True,
+                    output='screen',
+                    name='dds_agent',
+                )
+    
     node = Node(
                 package='formation',
                 executable='mc_formation_control_node',
                 output='screen',
                 shell=True,
-                arguments=['amc_' + str(amc_id)],
+                arguments=[LaunchConfiguration('amc_id')],
+                parameters=[{'test_phase': LaunchConfiguration('test_phase'),
+                             'lasting_time': LaunchConfiguration('lasting_time')}],
             )
     
-    dds_agent = ExecuteProcess(
-                    cmd=[[
-                        'MicroXRCEAgent serial --dev ' + dds_conn_dev,
-                    ]],
-                    shell=True,
-                    output='screen',
-                )
-
     gcs_map = Node(
                 package='formation',
                 executable='serial_mapping_node',
                 output='screen',
                 shell=True,
-                arguments=[gcs_ip, '14550'],
+                arguments=[LaunchConfiguration('gcs_ip'), '14550'],
             )
 
     return LaunchDescription([
+        *args,
         dds_agent,
         gcs_map,
         node,

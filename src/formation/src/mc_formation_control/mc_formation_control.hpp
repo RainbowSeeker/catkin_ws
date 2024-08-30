@@ -30,7 +30,7 @@ namespace formation {
 class MulticopterFormationControl : public rclcpp::Node {
 
 public:
-    MulticopterFormationControl(const std::string& node_name, std::chrono::milliseconds control_period = 20ms);
+    MulticopterFormationControl(int node_index, std::chrono::milliseconds control_period = 20ms);
     ~MulticopterFormationControl() = default;
 
 private:
@@ -39,11 +39,11 @@ private:
     }
 
     void timer_callback();
-	bool formation_preprocess();
+	int  formation_preprocess();
 	void formation_step();
-	void fms_step();
     void formation_enter();
     void formation_exit();
+    void fms_step();
     void publish_vehicle_command(uint16_t command, float param1, float param2 = NAN, float param3 = NAN, float param4 = NAN, float param5 = NAN, float param6 = NAN, float param7 = NAN);
 	void publish_trajectory_setpoint(float velocity[3], float yaw);
     void handle_command(const form_msgs::msg::UavCommand::SharedPtr msg);
@@ -69,6 +69,7 @@ private:
 
     // Parameters
     rclcpp::Parameter      _param_test_phase{"test_phase", "single"};
+    rclcpp::Parameter      _param_lasting_time{"lasting_time", 60}; // [s]
     rclcpp::Parameter      _param_hgt_sp{"mc_hgt_sp", 5.0}; // [m]
     rclcpp::Parameter      _param_hgt_kp{"mc_hgt_kp", 0.5};
     rclcpp::Parameter      _param_hgt_ki{"mc_hgt_ki", 0.05};
@@ -77,6 +78,7 @@ private:
     inline void parameters_declare()
     {
         ParameterManager::add_parameter(&_param_test_phase);
+        ParameterManager::add_parameter(&_param_lasting_time);
         ParameterManager::add_parameter(&_param_hgt_sp);
         ParameterManager::add_parameter(&_param_hgt_kp);
         ParameterManager::add_parameter(&_param_hgt_ki);
@@ -103,7 +105,7 @@ private:
     int     _test_phase{PHASE_SINGLE};	// determine the running type of uavs. 0: single, 1: formation
 
     // bool
-    bool    _stop{true};
+    bool    _is_stop{true};
     bool    _is_emergency{false};
 
     // Time

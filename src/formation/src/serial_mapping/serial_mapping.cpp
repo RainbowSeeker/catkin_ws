@@ -251,12 +251,15 @@ private:
 };
 
 
-int main(int argc, const char** argv) {
-
+int main(int argc, const char** argv) 
+{
     std::string dst_ip = "localhost";
     std::string dst_port = "14550";
-    if (argc > 2) {
+    if (argc > 1) {
         dst_ip = argv[1];
+    }
+
+    if (argc > 2) {
         dst_port = argv[2];
     }
 
