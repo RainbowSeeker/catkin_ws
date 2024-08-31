@@ -94,11 +94,43 @@ public:
         
         _pollfd.events = POLLIN;
         std::cout << "Serial [" << port <<"] opened." << std::endl;
+
+        if (open_mavlinkv2() < 0)
+        {
+            throw std::runtime_error("Failed to open mavlinkv2");
+        }
     }
 
     ~SerialDevice() 
     {
         close(_pollfd.fd);
+    }
+
+    int open_mavlinkv2()
+    {
+        const char mavlinkv2[] = {(char)0xfd, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+        int nread = SerialDevice::write(mavlinkv2, sizeof(mavlinkv2));
+        if (nread < 0)
+        {
+            std::cout << "Failed to write mavlinkv2" << std::endl;
+            return nread;
+        }
+
+        int timeout = 100;
+        int wait_bytes = 100;
+        while (wait_bytes > 0 && timeout > 0)
+        {
+            char buf[128];
+            int nread = SerialDevice::read(buf, sizeof(buf));
+            if (nread > 0)
+            {
+                wait_bytes -= nread;
+            }
+            timeout--;
+            usleep(20 * 1000);
+        }
+
+        return timeout > 0 ? 0 : -1;
     }
 
     int write(const char* buf, int len)
