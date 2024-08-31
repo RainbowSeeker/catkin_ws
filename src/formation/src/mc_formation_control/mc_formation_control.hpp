@@ -44,8 +44,9 @@ private:
     void formation_enter();
     void formation_exit();
     void fms_step();
-    void publish_vehicle_command(uint16_t command, float param1, float param2 = NAN, float param3 = NAN, float param4 = NAN, float param5 = NAN, float param6 = NAN, float param7 = NAN);
+    void publish_vehicle_command(uint32_t command, float param1, float param2 = NAN, float param3 = NAN, float param4 = NAN, double param5 = NAN, double param6 = NAN, float param7 = NAN);
 	void publish_trajectory_setpoint(float velocity[3], float yaw);
+    int  publish_ekf_origin();
     void handle_command(const form_msgs::msg::UavCommand::SharedPtr msg);
 
     inline bool uav_is_active() {
@@ -68,8 +69,10 @@ private:
     rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr             _vehicle_command_pub;
 
     // Parameters
-    rclcpp::Parameter      _param_test_phase{"test_phase", "single"};
+    rclcpp::Parameter      _param_test_phase{"test_phase", "formation"};
     rclcpp::Parameter      _param_lasting_time{"lasting_time", 60}; // [s]
+    rclcpp::Parameter      _param_ori_lat{"origin_lat", 47.397742}; // [deg]
+    rclcpp::Parameter      _param_ori_lon{"origin_lon", 8.5455940}; // [deg]
     rclcpp::Parameter      _param_hgt_sp{"mc_hgt_sp", 5.0}; // [m]
     rclcpp::Parameter      _param_hgt_kp{"mc_hgt_kp", 0.5};
     rclcpp::Parameter      _param_hgt_ki{"mc_hgt_ki", 0.05};
@@ -79,6 +82,8 @@ private:
     {
         ParameterManager::add_parameter(&_param_test_phase);
         ParameterManager::add_parameter(&_param_lasting_time);
+        ParameterManager::add_parameter(&_param_ori_lat);
+        ParameterManager::add_parameter(&_param_ori_lon);
         ParameterManager::add_parameter(&_param_hgt_sp);
         ParameterManager::add_parameter(&_param_hgt_kp);
         ParameterManager::add_parameter(&_param_hgt_ki);
@@ -107,6 +112,7 @@ private:
     // bool
     bool    _is_stop{true};
     bool    _is_emergency{false};
+    bool    _is_set_efk_origin{false};
 
     // Time
     rclcpp::Time _first_ready_time{ROS_ZERO_TIME};

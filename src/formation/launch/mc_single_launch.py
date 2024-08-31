@@ -10,6 +10,8 @@ def generate_launch_description():
     args = [DeclareLaunchArgument('amc_id', default_value='1', description='AMC ID'), 
             DeclareLaunchArgument('test_phase', default_value='single', description='test phase'),
             DeclareLaunchArgument('lasting_time', default_value='30', description='fly lasting time'),
+            DeclareLaunchArgument('origin_lat', default_value='24.43758', description='origin latitude'),
+            DeclareLaunchArgument('origin_lon', default_value='118.09782', description='origin longitude'),
             DeclareLaunchArgument('dds_baudrate', default_value='2000000', description='DDS baudrate'),
             DeclareLaunchArgument('gcs_ip', default_value='127.0.0.1', description='target GCS IP address')]
 
@@ -30,7 +32,9 @@ def generate_launch_description():
                 shell=True,
                 arguments=[LaunchConfiguration('amc_id')],
                 parameters=[{'test_phase': LaunchConfiguration('test_phase'),
-                             'lasting_time': LaunchConfiguration('lasting_time')}],
+                             'lasting_time': LaunchConfiguration('lasting_time'),
+                             'origin_lat': LaunchConfiguration('origin_lat'),
+                             'origin_lon': LaunchConfiguration('origin_lon')}],
             )
     
     gcs_map = Node(

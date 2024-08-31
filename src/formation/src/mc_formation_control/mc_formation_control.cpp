@@ -192,11 +192,17 @@ int MulticopterFormationControl::formation_preprocess()
     // check list 2: cross data ready
     if (_test_phase == PHASE_FORMATION)
     {
+        if (publish_ekf_origin())
+        {
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Wait for ekf origin.");
+            return RESULT_FAILED;
+        }
+
         for (int i = 0; i < 3; i++)
         {
             if (get_clock()->now() - _last_cross_time[i] > 1s)
             {
-                RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Wait for cross data from id: %d.", i);
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Wait for cross data from id: %d.", i + 1);
                 return RESULT_FAILED;
             }
         }
@@ -342,7 +348,7 @@ void MulticopterFormationControl::fms_step()
     }
 }
 
-void MulticopterFormationControl::publish_vehicle_command(uint16_t command, float param1, float param2, float param3, float param4, float param5, float param6, float param7) 
+void MulticopterFormationControl::publish_vehicle_command(uint32_t command, float param1, float param2, float param3, float param4, double param5, double param6, float param7) 
 {
     VehicleCommand cmd{};
     cmd.command = command;
@@ -380,6 +386,37 @@ void MulticopterFormationControl::publish_trajectory_setpoint(float velocity[3],
     setpoint.yaw = yaw;
     setpoint.timestamp = absolute_time();
 	_trajectory_setpoint_pub->publish(setpoint);
+}
+
+int MulticopterFormationControl::publish_ekf_origin() 
+{
+    if (_is_set_efk_origin)
+    {
+        return RESULT_SUCCESS;
+    }
+
+    if (!std::isfinite(_local_pos.ref_lat) || !std::isfinite(_local_pos.ref_lon) || !std::isfinite(_local_pos.ref_alt))
+    {
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Unvalid ekf origin: lat: %.6f, lon: %.6f, alt: %.2f", _local_pos.ref_lat, _local_pos.ref_lon, _local_pos.ref_alt);
+        return RESULT_FAILED;
+    }
+
+    double ref_lat = _param_ori_lat.as_double();
+    double ref_lon = _param_ori_lon.as_double();
+    float  ref_alt = _local_pos.ref_alt;
+
+    if (std::abs(_local_pos.ref_lat - ref_lat) < 1e-6
+        && std::abs(_local_pos.ref_lon - ref_lon) < 1e-6
+        && std::abs(_local_pos.ref_alt - ref_alt) < 1e-6)
+    {
+        _is_set_efk_origin = true;
+        std::cout << "err:" << std::abs(_local_pos.ref_lat - ref_alt) << std::endl;
+        RCLCPP_INFO(this->get_logger(), "Succeed in setting ekf origin: lat: %.6f, lon: %.6f, alt: %.2f", ref_lat, ref_lon, ref_alt);
+        return RESULT_SUCCESS;
+    }
+
+    publish_vehicle_command(VehicleCommand::VEHICLE_CMD_SET_GPS_GLOBAL_ORIGIN, 0, 0, 0, 0, ref_lat, ref_lon, ref_alt);
+    return RESULT_FAILED;
 }
 
 
