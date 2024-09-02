@@ -1,53 +1,29 @@
 import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.substitutions import LaunchConfiguration, TextSubstitution
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
 
-    # declare launch arguments
-    args = [DeclareLaunchArgument('amc_id', default_value='1', description='AMC ID'), 
-            DeclareLaunchArgument('test_phase', default_value='single', description='test phase'),
-            DeclareLaunchArgument('lasting_time', default_value='30', description='fly lasting time'),
-            DeclareLaunchArgument('origin_lat', default_value='24.43758', description='origin latitude'),
-            DeclareLaunchArgument('origin_lon', default_value='118.09782', description='origin longitude'),
-            DeclareLaunchArgument('dds_baudrate', default_value='2000000', description='DDS baudrate'),
-            DeclareLaunchArgument('gcs_ip', default_value='127.0.0.1', description='target GCS IP address')]
+    # get parameters from yaml file
+    param_file_path = os.path.join(get_package_share_directory('formation'), 'config', 'params.yaml')
 
-    dds_agent = ExecuteProcess(
-                    cmd=[
-                        'pgrep MicroXRCEAgent > /dev/null || MicroXRCEAgent serial --dev /dev/ttyS0 --baudrate', 
-                        LaunchConfiguration('dds_baudrate')
-                    ],
-                    shell=True,
-                    output='screen',
-                    name='dds_agent',
-                )
-    
+    # declare launch arguments
+    args = [DeclareLaunchArgument('amc_id', default_value='1', description='AMC ID'),]
+
     node = Node(
                 package='formation',
                 executable='mc_formation_control_node',
                 output='screen',
                 shell=True,
                 arguments=[LaunchConfiguration('amc_id')],
-                parameters=[{'test_phase': LaunchConfiguration('test_phase'),
-                             'lasting_time': LaunchConfiguration('lasting_time'),
-                             'origin_lat': LaunchConfiguration('origin_lat'),
-                             'origin_lon': LaunchConfiguration('origin_lon')}],
+                parameters=[param_file_path],
             )
-    
-    gcs_map = Node(
-                package='formation',
-                executable='serial_mapping_node',
-                output='screen',
-                shell=True,
-                arguments=[LaunchConfiguration('gcs_ip'), '14550'],
-            )
+
 
     return LaunchDescription([
         *args,
-        dds_agent,
-        gcs_map,
         node,
     ])
