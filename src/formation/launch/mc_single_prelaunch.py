@@ -11,7 +11,7 @@ def generate_launch_description():
     param_file_path = os.path.join(get_package_share_directory('formation'), 'config', 'params.yaml')
 
     with open(param_file_path, 'r') as file:
-        params = yaml.safe_load(file)['/serial_mapping']['ros__parameters']
+        params = yaml.safe_load(file)['/**']['ros__parameters']
         dds_baudrate = params['dds_baudrate']
         gcs_ip = params['gcs_ip']
     

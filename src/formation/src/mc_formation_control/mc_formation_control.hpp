@@ -39,6 +39,7 @@ private:
     }
 
     void timer_callback();
+    int  runtime_preprocess();
 	int  formation_preprocess();
 	void formation_step();
     void formation_enter();
@@ -51,6 +52,10 @@ private:
 
     inline bool uav_is_active() {
         return get_clock()->now() - _last_fmuout_time < 500ms;
+    }
+
+    inline void delay(const rclcpp::Duration &delay_time) {
+        _delay_time = delay_time;
     }
 
     rclcpp::TimerBase::SharedPtr _timer;
@@ -73,6 +78,7 @@ private:
     rclcpp::Parameter      _param_lasting_time{"lasting_time", 60}; // [s]
     rclcpp::Parameter      _param_ori_lat{"origin_lat", 47.397742}; // [deg]
     rclcpp::Parameter      _param_ori_lon{"origin_lon", 8.5455940}; // [deg]
+    rclcpp::Parameter      _param_ori_alt{"origin_alt", 488.15799}; // [m]
     rclcpp::Parameter      _param_hgt_sp{"mc_hgt_sp", 5.0}; // [m]
     rclcpp::Parameter      _param_hgt_kp{"mc_hgt_kp", 0.5};
     rclcpp::Parameter      _param_hgt_ki{"mc_hgt_ki", 0.05};
@@ -84,6 +90,7 @@ private:
         ParameterManager::add_parameter(&_param_lasting_time);
         ParameterManager::add_parameter(&_param_ori_lat);
         ParameterManager::add_parameter(&_param_ori_lon);
+        ParameterManager::add_parameter(&_param_ori_alt);
         ParameterManager::add_parameter(&_param_hgt_sp);
         ParameterManager::add_parameter(&_param_hgt_kp);
         ParameterManager::add_parameter(&_param_hgt_ki);
@@ -106,6 +113,7 @@ private:
     px4_msgs::msg::VehicleStatus	    _vehicle_status{};
     form_msgs::msg::UavCommand          _command{};
     double _yaw{0.0}; // [rad]
+    double _takeoff_hgt{0.0}; // [m]
 
     int     _test_phase{PHASE_SINGLE};	// determine the running type of uavs. 0: single, 1: formation
 
@@ -113,6 +121,7 @@ private:
     bool    _is_stop{true};
     bool    _is_emergency{false};
     bool    _is_set_efk_origin{false};
+    bool    _is_landing{false};
 
     // Time
     rclcpp::Time _first_ready_time{ROS_ZERO_TIME};
@@ -122,6 +131,7 @@ private:
 
     // Duration
 	rclcpp::Duration _running_time{0, 0};
+    rclcpp::Duration _delay_time{0, 0};
 
     // Formation Related
     int _uav_id{0};

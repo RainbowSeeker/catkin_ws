@@ -18,6 +18,8 @@ static const uint8_t ignore_state[] = {
     px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_MANUAL,
     px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_AUTO_LOITER,
     px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_POSCTL,
+    px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_AUTO_LAND,
+    px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_AUTO_RTL,
 };
 static const std::map<uint8_t, std::string> state_str = {
     {px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_MANUAL,         "MANUAL"},
@@ -133,6 +135,9 @@ MulticopterFormationControl::MulticopterFormationControl(int node_index, std::ch
 
 void MulticopterFormationControl::timer_callback() 
 {
+    if (runtime_preprocess())   
+        return;
+
 	/* only run controller if cross data ready */
     switch (formation_preprocess())
     {
@@ -151,6 +156,35 @@ void MulticopterFormationControl::timer_callback()
     }
 }
 
+int MulticopterFormationControl::runtime_preprocess()
+{
+    // is over time ?
+    if (_running_time > 1s * _param_lasting_time.as_int())
+    {
+        if (_vehicle_status.nav_state == VehicleStatus::NAVIGATION_STATE_AUTO_LAND)
+        {
+            _is_landing = true;
+        }
+
+        if (!_is_landing)
+        {
+            // switch to land mode
+            publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 4, 6);
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *get_clock(), 1000, "Timeout: Try to switch to land mode.");
+        }
+        return RESULT_WAITING;
+    }
+
+    // simulate delay
+    if (_delay_time > 0s)
+    {
+        _delay_time = _delay_time - 1ns * _control_interval;
+        RCLCPP_DEBUG_THROTTLE(this->get_logger(), *get_clock(), 100, "Delaying, left: %.2f s", _delay_time.seconds());
+        return RESULT_WAITING;
+    }
+
+    return RESULT_SUCCESS;
+}
 
 int MulticopterFormationControl::formation_preprocess()
 {
@@ -161,26 +195,7 @@ int MulticopterFormationControl::formation_preprocess()
         RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Wait for GCS.");
         return RESULT_FAILED;
     }
-#endif
-    
-    // check list 0: is over time
-    if (_running_time > 1s * _param_lasting_time.as_int())
-    {
-        static bool is_landing = false;
-
-        if (_vehicle_status.nav_state == VehicleStatus::NAVIGATION_STATE_AUTO_LAND)
-        {
-            is_landing = true;
-        }
-
-        if (!is_landing)
-        {
-            // switch to land mode
-            publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 4, 6);
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *get_clock(), 1000, "Timeout: Try to switch to land mode.");
-        }
-        return RESULT_WAITING;
-    }
+#endif    
 
     // check list 1: px4 data ready
     if (!uav_is_active())
@@ -195,6 +210,7 @@ int MulticopterFormationControl::formation_preprocess()
         if (publish_ekf_origin())
         {
             RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Wait for ekf origin.");
+            delay(1s);
             return RESULT_FAILED;
         }
 
@@ -224,7 +240,8 @@ int MulticopterFormationControl::formation_preprocess()
         publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6);
         publish_vehicle_command(VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1);
 
-		formation_step();
+        float velocity[3] = {0.0f, 0.0f, -0.5f};
+        publish_trajectory_setpoint(velocity, _yaw);
 
 		RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Try to switch to formation mode.");
 		return RESULT_WAITING;
@@ -239,6 +256,7 @@ void MulticopterFormationControl::formation_enter()
     if (_first_ready_time == rclcpp::Time(ROS_ZERO_TIME))
     {
         _first_ready_time = get_clock()->now();
+        _takeoff_hgt = -_local_pos.z;
     }
 
     _running_time = get_clock()->now() - _first_ready_time;
@@ -285,7 +303,7 @@ void MulticopterFormationControl::fms_step()
     const uint64_t dt = _control_interval;
 
     // height hold
-    double vh_cmd = _hgt_ctrl.computeCommand(_param_hgt_sp.as_double() + _local_pos.z, dt);
+    double vh_cmd = _hgt_ctrl.computeCommand(_takeoff_hgt + _param_hgt_sp.as_double() + _local_pos.z, dt);
 
     // yaw hold
     const double yaw_cmd = math::radians(_param_yaw_sp.as_double());
@@ -403,14 +421,13 @@ int MulticopterFormationControl::publish_ekf_origin()
 
     double ref_lat = _param_ori_lat.as_double();
     double ref_lon = _param_ori_lon.as_double();
-    float  ref_alt = _local_pos.ref_alt;
+    float  ref_alt = static_cast<float>(_param_ori_alt.as_double());
 
     if (std::abs(_local_pos.ref_lat - ref_lat) < 1e-6
         && std::abs(_local_pos.ref_lon - ref_lon) < 1e-6
         && std::abs(_local_pos.ref_alt - ref_alt) < 1e-6)
     {
         _is_set_efk_origin = true;
-        std::cout << "err:" << std::abs(_local_pos.ref_lat - ref_alt) << std::endl;
         RCLCPP_INFO(this->get_logger(), "Succeed in setting ekf origin: lat: %.6f, lon: %.6f, alt: %.2f", ref_lat, ref_lon, ref_alt);
         return RESULT_SUCCESS;
     }

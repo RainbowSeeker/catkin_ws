@@ -1,10 +1,13 @@
 import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
-from launch.substitutions import LaunchConfiguration, TextSubstitution
+from launch.actions import ExecuteProcess, TimerAction
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
+
+    # get parameters from yaml file
+    param_file_path = os.path.join(get_package_share_directory('formation'), 'config', 'params.yaml')
 
     dds_agent = ExecuteProcess(
                     cmd=[
@@ -24,10 +27,10 @@ def generate_launch_description():
                 output='screen',
                 shell=True,
                 arguments=[str(i + 1)],
-                parameters=[{'test_phase': 'formation'}] # 'test_phase': 'single' or 'formation'
+                parameters=[param_file_path]
             )
         )
-    delay_amc = TimerAction(period=10.0, actions=[*node])
+    delay_amc = TimerAction(period=20.0, actions=[*node])
 
     px4_client = []
     for i in range(3):
