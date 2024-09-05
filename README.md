@@ -20,8 +20,8 @@ sudo nmcli connection up 'wifi_name'        # start connection
 ```
 2. start ros2 node
 ```
-ros2 launch formation mc_single_prelaunch.py &
-ros2 launch formation mc_single_launch.py amc_id:=1 # from 1 to 3
+ros2 launch formation mc_single_prelaunch.py amc_id:=1 &
+ros2 launch formation mc_single_launch.py amc_id:=1
 ```
 or Using `form_tools.sh`:
 ```

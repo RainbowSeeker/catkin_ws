@@ -120,8 +120,23 @@ MulticopterFormationControl::MulticopterFormationControl(int node_index, std::ch
                 _formation_cross.vd[i] = msg->vz;
                 _formation_cross.time_usec[i] = msg->timestamp;
                 _last_cross_time[i] = get_clock()->now();
+
+                // check ekf origin is same
+                if (_origin_ref_timestamp[i] != msg->timestamp)
+                {
+                    _origin_ref_timestamp[i] = msg->timestamp;
+                    _is_same_origin[i] = false;
+                }
+
+                if (!_is_same_origin[i] && std::isfinite(msg->ref_lat) && std::abs(msg->ref_lat - _param_ori_lat.as_double()) < 1e-7 &&
+                    std::isfinite(msg->ref_lon) && std::abs(msg->ref_lon - _param_ori_lon.as_double()) < 1e-7 &&
+                    std::isfinite(msg->ref_alt) && std::abs(msg->ref_alt - (float)_param_ori_alt.as_double()) < 1e-3)
+                {
+                    _is_same_origin[i] = true;
+                }
             });
         }
+        timer_postpone(2s); // wait for gps data
     }
 
     _command_sub = this->create_subscription<form_msgs::msg::UavCommand>(
@@ -176,10 +191,10 @@ int MulticopterFormationControl::runtime_preprocess()
     }
 
     // simulate delay
-    if (_delay_time > 0s)
+    if (_postpone_time > 0s)
     {
-        _delay_time = _delay_time - 1ns * _control_interval;
-        RCLCPP_DEBUG_THROTTLE(this->get_logger(), *get_clock(), 100, "Delaying, left: %.2f s", _delay_time.seconds());
+        _postpone_time = _postpone_time - 1ns * _control_interval;
+        RCLCPP_DEBUG_THROTTLE(this->get_logger(), *get_clock(), 100, "Delaying, left: %.2f s", _postpone_time.seconds());
         return RESULT_WAITING;
     }
 
@@ -207,15 +222,16 @@ int MulticopterFormationControl::formation_preprocess()
     // check list 2: cross data ready
     if (_test_phase == PHASE_FORMATION)
     {
-        if (publish_ekf_origin())
-        {
-            RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Wait for ekf origin.");
-            delay(1s);
-            return RESULT_FAILED;
-        }
-
         for (int i = 0; i < 3; i++)
         {
+            // check origin is same
+            if (!_is_same_origin[i])
+            {
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Ekf origin is not same with [%d].", i + 1);
+                timer_postpone(1s);
+                return RESULT_FAILED;
+            }
+
             if (get_clock()->now() - _last_cross_time[i] > 1s)
             {
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Wait for cross data from id: %d.", i + 1);
@@ -405,37 +421,6 @@ void MulticopterFormationControl::publish_trajectory_setpoint(float velocity[3],
     setpoint.timestamp = absolute_time();
 	_trajectory_setpoint_pub->publish(setpoint);
 }
-
-int MulticopterFormationControl::publish_ekf_origin() 
-{
-    if (_is_set_efk_origin)
-    {
-        return RESULT_SUCCESS;
-    }
-
-    if (!std::isfinite(_local_pos.ref_lat) || !std::isfinite(_local_pos.ref_lon) || !std::isfinite(_local_pos.ref_alt))
-    {
-        RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Unvalid ekf origin: lat: %.6f, lon: %.6f, alt: %.2f", _local_pos.ref_lat, _local_pos.ref_lon, _local_pos.ref_alt);
-        return RESULT_FAILED;
-    }
-
-    double ref_lat = _param_ori_lat.as_double();
-    double ref_lon = _param_ori_lon.as_double();
-    float  ref_alt = static_cast<float>(_param_ori_alt.as_double());
-
-    if (std::abs(_local_pos.ref_lat - ref_lat) < 1e-6
-        && std::abs(_local_pos.ref_lon - ref_lon) < 1e-6
-        && std::abs(_local_pos.ref_alt - ref_alt) < 1e-6)
-    {
-        _is_set_efk_origin = true;
-        RCLCPP_INFO(this->get_logger(), "Succeed in setting ekf origin: lat: %.6f, lon: %.6f, alt: %.2f", ref_lat, ref_lon, ref_alt);
-        return RESULT_SUCCESS;
-    }
-
-    publish_vehicle_command(VehicleCommand::VEHICLE_CMD_SET_GPS_GLOBAL_ORIGIN, 0, 0, 0, 0, ref_lat, ref_lon, ref_alt);
-    return RESULT_FAILED;
-}
-
 
 void MulticopterFormationControl::handle_command(const form_msgs::msg::UavCommand::SharedPtr msg)
 {

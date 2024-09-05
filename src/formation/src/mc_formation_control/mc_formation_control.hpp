@@ -47,15 +47,14 @@ private:
     void fms_step();
     void publish_vehicle_command(uint32_t command, float param1, float param2 = NAN, float param3 = NAN, float param4 = NAN, double param5 = NAN, double param6 = NAN, float param7 = NAN);
 	void publish_trajectory_setpoint(float velocity[3], float yaw);
-    int  publish_ekf_origin();
     void handle_command(const form_msgs::msg::UavCommand::SharedPtr msg);
 
     inline bool uav_is_active() {
         return get_clock()->now() - _last_fmuout_time < 500ms;
     }
 
-    inline void delay(const rclcpp::Duration &delay_time) {
-        _delay_time = delay_time;
+    inline void timer_postpone(const rclcpp::Duration &postpone_time) {
+        _postpone_time = _postpone_time + postpone_time;
     }
 
     rclcpp::TimerBase::SharedPtr _timer;
@@ -120,7 +119,7 @@ private:
     // bool
     bool    _is_stop{true};
     bool    _is_emergency{false};
-    bool    _is_set_efk_origin{false};
+    bool    _is_same_origin[3] {false, false, false};
     bool    _is_landing{false};
 
     // Time
@@ -128,10 +127,11 @@ private:
     rclcpp::Time _last_fmuout_time{ROS_ZERO_TIME};
     rclcpp::Time _last_cross_time[3]{{ROS_ZERO_TIME}, {ROS_ZERO_TIME}, {ROS_ZERO_TIME}};
     uint64_t _control_interval; // [ns]
+    uint64_t _origin_ref_timestamp[3]{UINT64_MAX, UINT64_MAX, UINT64_MAX};
 
     // Duration
 	rclcpp::Duration _running_time{0, 0};
-    rclcpp::Duration _delay_time{0, 0};
+    rclcpp::Duration _postpone_time{0, 0};
 
     // Formation Related
     int _uav_id{0};
