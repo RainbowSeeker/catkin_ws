@@ -8,7 +8,13 @@
 #include <iostream>
 #include <thread>
 #include <memory>
+#include <mutex>
+#include <atomic>
+#include <condition_variable>
+#include <queue>
 #include <filesystem>
+
+using namespace std::chrono_literals;
 
 class SerialDevice
 {
@@ -20,7 +26,7 @@ public:
         {
             throw std::runtime_error("Failed to open serial port: " + std::string(strerror(errno)));
         }
-    
+
         int speed;
         switch (baudrate)
         {
@@ -91,7 +97,7 @@ public:
         {
             throw std::runtime_error("Failed to set terminal attributes: " + std::string(strerror(errno)));
         }
-        
+
         _pollfd.events = POLLIN;
         std::cout << "Serial [" << port <<"] opened." << std::endl;
 
@@ -101,7 +107,7 @@ public:
         }
     }
 
-    ~SerialDevice() 
+    ~SerialDevice()
     {
         close(_pollfd.fd);
     }
@@ -109,16 +115,25 @@ public:
     int open_mavlinkv2()
     {
         const char mavlinkv2[] = {(char)0xfd, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        int nread = SerialDevice::write(mavlinkv2, sizeof(mavlinkv2));
-        if (nread < 0)
+        int retry = 10;
+        while (retry > 0)
         {
-            std::cout << "Failed to write mavlinkv2" << std::endl;
-            return nread;
+            int nwrite = SerialDevice::write(mavlinkv2, sizeof(mavlinkv2));
+            if (nwrite == sizeof(mavlinkv2))
+            {
+                break;
+            }
+            retry--;
+            usleep(100 * 1000);
+        }
+        if (retry == 0)
+        {
+            return -1;
         }
 
-        int timeout = 100;
+        retry = 100;
         int wait_bytes = 100;
-        while (wait_bytes > 0 && timeout > 0)
+        while (wait_bytes > 0 && retry > 0)
         {
             char buf[128];
             int nread = SerialDevice::read(buf, sizeof(buf));
@@ -126,19 +141,24 @@ public:
             {
                 wait_bytes -= nread;
             }
-            timeout--;
+            retry--;
             usleep(20 * 1000);
         }
 
-        return timeout > 0 ? 0 : -1;
+        return retry > 0 ? 0 : -1;
     }
 
     int write(const char* buf, int len)
     {
+        std::lock_guard<std::mutex> lock(_mutex);
         int ret = ::write(_pollfd.fd, buf, len);
         if (ret < 0)
         {
-            std::cout << "Failed to write to serial port:" << ret << std::endl;
+            if (errno == ENODEV || errno == EIO)
+            {
+                throw std::runtime_error("Serial port disconnected");
+            }
+            std::cout << "Failed to write to serial port:" << strerror(errno) << std::endl;
         }
         return ret;
     }
@@ -148,10 +168,18 @@ public:
         int ret = ::poll(&_pollfd, 1, 1000);
         if (ret > 0)
         {
-            ret = ::read(_pollfd.fd, buf, len);
-            if (ret < 0)
+            if (_pollfd.revents & POLLHUP)
             {
-                std::cout << "Failed to read from serial port:" << ret << std::endl;
+                throw std::runtime_error("Serial port disconnected");
+            }
+            else if (_pollfd.revents & POLLIN)
+            {
+                std::lock_guard<std::mutex> lock(_mutex);
+                ret = ::read(_pollfd.fd, buf, len);
+                if (ret < 0)
+                {
+                    std::cout << "Failed to read from serial port:" << strerror(errno) << std::endl;
+                }
             }
         }
         return ret;
@@ -159,6 +187,7 @@ public:
 
 private:
     struct pollfd _pollfd;
+    std::mutex _mutex;
 };
 
 class UdpDevice
@@ -199,16 +228,21 @@ public:
         std::cout << "UDP [" << ip << ":" << port << "] opened." << std::endl;
     }
 
-    ~UdpDevice() 
+    ~UdpDevice()
     {
         close(_pollfd.fd);
     }
 
     int write(const char* buf, int len)
     {
+        std::lock_guard<std::mutex> lock(_mutex);
         int ret = send(_pollfd.fd, buf, len, 0);
         if (ret < 0)
         {
+            if (errno == ECONNREFUSED)
+            {
+                throw std::runtime_error("UDP socket disconnected");
+            }
             std::cout << "Failed to write to UDP socket:" << strerror(errno) << std::endl;
         }
         return ret;
@@ -219,22 +253,31 @@ public:
         int ret = poll(&_pollfd, 1, 1000);
         if (ret > 0)
         {
-            ret = recv(_pollfd.fd, buf, len, 0);
-            if (ret < 0)
+            if (_pollfd.revents & POLLERR)
             {
-                std::cout << "Failed to read from UDP socket:" << strerror(errno) << std::endl;
+                throw std::runtime_error("UDP socket disconnected");
+            }
+            else if (_pollfd.revents & POLLIN)
+            {
+                std::lock_guard<std::mutex> lock(_mutex);
+                ret = recv(_pollfd.fd, buf, len, 0);
+                if (ret < 0)
+                {
+                    std::cout << "Failed to read from UDP socket:" << strerror(errno) << std::endl;
+                }
             }
         }
         return ret;
     }
 private:
     struct pollfd _pollfd;
+    std::mutex _mutex;
 };
 
-class SerialMapping 
+class SerialMapping
 {
 public:
-    explicit SerialMapping(const char* serial_port, int serial_baudrate, const char* udp_ip, int udp_port): 
+    explicit SerialMapping(const char* serial_port, int serial_baudrate, const char* udp_ip, int udp_port):
         _serial(std::make_shared<SerialDevice>(serial_port, serial_baudrate)),
         _udp(std::make_shared<UdpDevice>(udp_ip, udp_port))
     {
@@ -242,29 +285,47 @@ public:
 
     void listen_serial()
     {
-        std::cout << "Listening serial" << std::endl;
-        char buf[1024];
-        while (true)
+        try
         {
-            int len = _serial->read(buf, sizeof(buf));
-            if (len > 0)
+            std::cout << "Listening serial" << std::endl;
+            char buf[4096];
+            while (!_should_exit)
             {
-                _udp->write(buf, len);
+                int len = _serial->read(buf, sizeof(buf));
+                if (len > 0)
+                {
+                    _udp->write(buf, len);
+                }
             }
+        }
+        catch(const std::exception& e)
+        {
+            std::unique_lock<std::mutex> lock(_mutex);
+            _ept_queue.push(std::current_exception());
+            _cv.notify_one();
         }
     }
 
     void listen_udp()
     {
-        std::cout << "Listening udp" << std::endl;
-        char buf[1024];
-        while (true)
+        try
         {
-            int len = _udp->read(buf, sizeof(buf));
-            if (len > 0)
+            std::cout << "Listening udp" << std::endl;
+            char buf[4096];
+            while (!_should_exit)
             {
-                _serial->write(buf, len);
+                int len = _udp->read(buf, sizeof(buf));
+                if (len > 0)
+                {
+                    _serial->write(buf, len);
+                }
             }
+        }
+        catch(const std::exception& e)
+        {
+            std::unique_lock<std::mutex> lock(_mutex);
+            _ept_queue.push(std::current_exception());
+            _cv.notify_one();
         }
     }
 
@@ -272,18 +333,28 @@ public:
     {
         std::thread serial_thread(&SerialMapping::listen_serial, this);
         std::thread udp_thread(&SerialMapping::listen_udp, this);
-        
+
+        {
+            std::unique_lock<std::mutex> lock(_mutex);
+            _cv.wait(lock, [this] { return !_ept_queue.empty(); });
+        }
+        _should_exit = true;
         serial_thread.join();
         udp_thread.join();
+        std::rethrow_exception(_ept_queue.front());
     }
 
 private:
     std::shared_ptr<SerialDevice> _serial;
     std::shared_ptr<UdpDevice> _udp;
+    std::atomic<bool> _should_exit {false};
+    std::mutex _mutex;
+    std::condition_variable _cv;
+    std::queue<std::exception_ptr> _ept_queue;
 };
 
 
-int main(int argc, const char** argv) 
+int main(int argc, const char** argv)
 {
     std::string dst_ip = "localhost";
     std::string dst_port = "14550";
@@ -299,6 +370,7 @@ int main(int argc, const char** argv)
     const std::string serial_prefix = "usb-CUAV_PX4";
     std::string serial_filename;
 
+    retry:
     try {
         bool found = false;
         for (const auto & entry : std::filesystem::directory_iterator(serial_dir))
@@ -321,9 +393,11 @@ int main(int argc, const char** argv)
         mapping.run();
 
     } catch (const std::exception& e) {
-        std::cerr << e.what() << std::endl;
-        return 1;
+        std::cerr << "runtime error: " << e.what() << std::endl;
+
+        std::this_thread::sleep_for(2s);
+        goto retry;
     }
-    
+
     return 0;
 }

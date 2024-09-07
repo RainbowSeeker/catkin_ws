@@ -1,4 +1,4 @@
-import os
+import os, yaml
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import ExecuteProcess, TimerAction
@@ -8,6 +8,28 @@ def generate_launch_description():
 
     # get parameters from yaml file
     param_file_path = os.path.join(get_package_share_directory('formation'), 'config', 'params.yaml')
+
+    with open(param_file_path, 'r') as file:
+        yaml_context = yaml.safe_load(file)
+        params = yaml_context['/**']['ros__parameters']
+        origin_lat = params['origin_lat']
+        origin_lon = params['origin_lon']
+        origin_alt = params['origin_alt']
+    
+    ekf_node = []
+    for i in range(3):
+        ekf_node.append(
+            Node(
+                package='formation',
+                executable='commander_node',
+                output='screen',
+                shell=True,
+                name='ekf_node_' + str(i + 1),
+                arguments=[str(i + 1), '100000', '0', '0', '0', '0', 
+                           str(origin_lat), str(origin_lon), str(origin_alt)],
+            )
+        )
+    delay_ekf = TimerAction(period=18.0, actions=[*ekf_node])
 
     dds_agent = ExecuteProcess(
                     cmd=[
@@ -26,6 +48,7 @@ def generate_launch_description():
                 executable='mc_formation_control_node',
                 output='screen',
                 shell=True,
+                name='mc_formation_control_node_' + str(i + 1),
                 arguments=[str(i + 1)],
                 parameters=[param_file_path]
             )
@@ -48,11 +71,13 @@ def generate_launch_description():
                 shell=True,
                 additional_env=px4_env,
                 output='screen',
+                name='px4_client_' + str(i + 1),
             )
         )
 
     return LaunchDescription([
         dds_agent,
         *px4_client,
-        delay_amc
+        delay_ekf,
+        delay_amc,
     ])
