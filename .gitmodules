@@ -1,0 +1,3 @@
+[submodule "src/gcs_transfer/pymavlink"]
+	path = src/gcs_transfer/pymavlink
+	url = https://github.com/ArduPilot/pymavlink.git
