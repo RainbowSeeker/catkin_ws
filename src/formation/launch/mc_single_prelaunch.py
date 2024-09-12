@@ -61,7 +61,7 @@ def generate_launch_description():
     
     gcs_map = Node(
                 package='formation',
-                executable='serial_mapping_node',
+                executable='serial_udp_bridge',
                 output='screen',
                 shell=True,
                 arguments=[LaunchConfiguration('gcs_ip'), '14550'],

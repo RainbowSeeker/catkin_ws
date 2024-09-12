@@ -18,6 +18,7 @@ find_package(px4_ros_com REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(form_msgs REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system filesystem)
 
 include_directories(
   include
