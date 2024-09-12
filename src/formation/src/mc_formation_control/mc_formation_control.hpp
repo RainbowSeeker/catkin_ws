@@ -1,3 +1,8 @@
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <memory.h>
+#include <form_msgs/msg/detail/uav_status__struct.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <string>
 #include <chrono>
@@ -9,6 +14,7 @@
 #include <px4_msgs/msg/vehicle_command.hpp>
 #include <px4_msgs/msg/formation_cross.hpp>
 #include <form_msgs/msg/uav_command.hpp>
+#include <form_msgs/msg/uav_status.hpp>
 
 #include "formation/parameter_manager.hpp"
 #include "control_toolbox/pid.hpp"
@@ -38,6 +44,12 @@ private:
         return get_clock()->now().nanoseconds() / 1e3; // [us]
     }
 
+    inline void update_sta_msg(const std::string &msg) {
+        int max_len = std::min(_uav_status.sta_msg.size(), msg.size() + 1);
+        std::memcpy(_uav_status.sta_msg.data(), msg.c_str(), max_len);
+        _uav_status.sta_msg[max_len - 1] = '\0';
+    }
+
     void timer_callback();
     int  runtime_preprocess();
 	int  formation_preprocess();
@@ -51,10 +63,6 @@ private:
 
     inline bool uav_is_active() {
         return get_clock()->now() - _last_fmuout_time < 500ms;
-    }
-
-    inline void timer_postpone(const rclcpp::Duration &postpone_time) {
-        _postpone_time = _postpone_time + postpone_time;
     }
 
     rclcpp::TimerBase::SharedPtr _timer;
@@ -71,6 +79,7 @@ private:
     rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr         _trajectory_setpoint_pub;
     rclcpp::Publisher<px4_msgs::msg::OffboardControlMode>::SharedPtr        _offboard_control_mode_pub;
     rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr             _vehicle_command_pub;
+    rclcpp::Publisher<form_msgs::msg::UavStatus>::SharedPtr                 _uav_status_pub;
 
     // Parameters
     rclcpp::Parameter      _param_test_phase{"test_phase", "formation"};
@@ -82,7 +91,7 @@ private:
     rclcpp::Parameter      _param_hgt_kp{"mc_hgt_kp", 0.5};
     rclcpp::Parameter      _param_hgt_ki{"mc_hgt_ki", 0.05};
     rclcpp::Parameter      _param_yaw_sp{"mc_yaw_sp", 0.0}; // [deg]
-    
+
     inline void parameters_declare()
     {
         ParameterManager::add_parameter(&_param_test_phase);
@@ -111,6 +120,7 @@ private:
 	px4_msgs::msg::VehicleAttitude	    _att{};
     px4_msgs::msg::VehicleStatus	    _vehicle_status{};
     form_msgs::msg::UavCommand          _command{};
+    form_msgs::msg::UavStatus           _uav_status{};
     double _yaw{0.0}; // [rad]
     double _takeoff_hgt{0.0}; // [m]
 
@@ -128,10 +138,10 @@ private:
     rclcpp::Time _last_cross_time[3]{{ROS_ZERO_TIME}, {ROS_ZERO_TIME}, {ROS_ZERO_TIME}};
     uint64_t _control_interval; // [ns]
     uint64_t _origin_ref_timestamp[3]{UINT64_MAX, UINT64_MAX, UINT64_MAX};
+    uint64_t _timer_cycle{0};
 
     // Duration
 	rclcpp::Duration _running_time{0, 0};
-    rclcpp::Duration _postpone_time{0, 0};
 
     // Formation Related
     int _uav_id{0};

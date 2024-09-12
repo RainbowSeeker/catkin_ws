@@ -1,7 +1,7 @@
 #include "mc_formation_control.hpp"
 #include "formation/utils.hpp"
 #include "px4_ros_com/frame_transforms.h"
-
+#include <variant>
 #include <Eigen/Eigen>
 #include <Eigen/Geometry>
 
@@ -53,14 +53,14 @@ static bool is_ignore_state(uint8_t state)
     return false;
 }
 
-MulticopterFormationControl::MulticopterFormationControl(int node_index, std::chrono::milliseconds control_period) : 
+MulticopterFormationControl::MulticopterFormationControl(int node_index, std::chrono::milliseconds control_period) :
     Node("amc_" + std::to_string(node_index)), _control_interval(control_period / 1ms * 1e6) // [ns]
 {
     parameters_declare();
 
     std::string topic_ns{""};
 
-    if (node_index) 
+    if (node_index)
     {
         _uav_id = node_index - 1;
         if (_uav_id < 0 || _uav_id >= 3)
@@ -71,7 +71,7 @@ MulticopterFormationControl::MulticopterFormationControl(int node_index, std::ch
 
     rmw_qos_profile_t qos_profile = rmw_qos_profile_sensor_data;
     auto qos = rclcpp::QoS(rclcpp::QoSInitialization(qos_profile.history, 5), qos_profile);
-		
+
     _local_pos_sub = this->create_subscription<VehicleLocalPosition>(
         topic_ns + "/fmu/out/vehicle_local_position", qos,
         [this](const VehicleLocalPosition::SharedPtr msg) {
@@ -101,7 +101,7 @@ MulticopterFormationControl::MulticopterFormationControl(int node_index, std::ch
 
     _vehicle_command_pub = this->create_publisher<VehicleCommand>(
         topic_ns + "/fmu/in/vehicle_command", 10);
-        
+
     // Subscribe formation cross
     _test_phase = _param_test_phase.as_string() == "formation" ? PHASE_FORMATION : PHASE_SINGLE;
 
@@ -136,21 +136,23 @@ MulticopterFormationControl::MulticopterFormationControl(int node_index, std::ch
                 }
             });
         }
-        timer_postpone(2s); // wait for gps data
     }
 
     _command_sub = this->create_subscription<form_msgs::msg::UavCommand>(
-        topic_ns + "/fmu/in/uav_command", qos,
+        topic_ns + "/fmu/in/uav_command", 10,
         std::bind(&MulticopterFormationControl::handle_command, this, std::placeholders::_1));
+
+    _uav_status_pub = this->create_publisher<form_msgs::msg::UavStatus>(
+        topic_ns + "/fmu/out/uav_status", 10);
 
     RCLCPP_INFO(this->get_logger(), "Formation node for %s started. Phase: %s", topic_ns.c_str(), _param_test_phase.as_string().c_str());
     _timer = this->create_wall_timer(control_period, std::bind(&MulticopterFormationControl::timer_callback, this));
 }
 
 
-void MulticopterFormationControl::timer_callback() 
+void MulticopterFormationControl::timer_callback()
 {
-    if (runtime_preprocess())   
+    if (runtime_preprocess())
         return;
 
 	/* only run controller if cross data ready */
@@ -173,6 +175,15 @@ void MulticopterFormationControl::timer_callback()
 
 int MulticopterFormationControl::runtime_preprocess()
 {
+    _timer_cycle += 1;
+    // publish uav status
+    if (_timer_cycle % 2 == 0)
+    {
+        _uav_status.timestamp = absolute_time();
+        _uav_status.stage = uav_is_active() && _vehicle_status.nav_state == VehicleStatus::NAVIGATION_STATE_OFFBOARD ? 1 : 0;
+        _uav_status_pub->publish(_uav_status);
+    }
+
     // is over time ?
     if (_running_time > 1s * _param_lasting_time.as_int())
     {
@@ -187,14 +198,7 @@ int MulticopterFormationControl::runtime_preprocess()
             publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 4, 6);
             RCLCPP_WARN_THROTTLE(this->get_logger(), *get_clock(), 1000, "Timeout: Try to switch to land mode.");
         }
-        return RESULT_WAITING;
-    }
-
-    // simulate delay
-    if (_postpone_time > 0s)
-    {
-        _postpone_time = _postpone_time - 1ns * _control_interval;
-        RCLCPP_DEBUG_THROTTLE(this->get_logger(), *get_clock(), 100, "Delaying, left: %.2f s", _postpone_time.seconds());
+        update_sta_msg("Landing.");
         return RESULT_WAITING;
     }
 
@@ -208,14 +212,16 @@ int MulticopterFormationControl::formation_preprocess()
     if (_is_stop)
     {
         RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Wait for GCS.");
+        update_sta_msg("Wait for GCS.");
         return RESULT_FAILED;
     }
-#endif    
+#endif
 
     // check list 1: px4 data ready
     if (!uav_is_active())
     {
         RCLCPP_WARN_THROTTLE(this->get_logger(), *get_clock(), 1000, "Fmu data lost.");
+        update_sta_msg("Fmu data lost.");
         return RESULT_FAILED;
     }
 
@@ -228,13 +234,14 @@ int MulticopterFormationControl::formation_preprocess()
             if (!_is_same_origin[i])
             {
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Ekf origin is not same with [%d].", i + 1);
-                timer_postpone(1s);
+                update_sta_msg("Ekf ori isn't same.");
                 return RESULT_FAILED;
             }
 
             if (get_clock()->now() - _last_cross_time[i] > 1s)
             {
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Wait for cross data from id: %d.", i + 1);
+                update_sta_msg("Wait for cross data.");
                 return RESULT_FAILED;
             }
         }
@@ -244,11 +251,12 @@ int MulticopterFormationControl::formation_preprocess()
     if (is_ignore_state(_vehicle_status.nav_state))
     {
         RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "cannot control, nav_state: %s", get_state(_vehicle_status.nav_state));
+        update_sta_msg("Cannot control.");
         return RESULT_WAITING;
     }
 
 	// check list 4: switch to formation mode
-	bool is_offboard = _vehicle_status.arming_state == VehicleStatus::ARMING_STATE_ARMED && 
+	bool is_offboard = _vehicle_status.arming_state == VehicleStatus::ARMING_STATE_ARMED &&
                         _vehicle_status.nav_state == VehicleStatus::NAVIGATION_STATE_OFFBOARD;
 	if (!is_offboard)
 	{
@@ -260,10 +268,12 @@ int MulticopterFormationControl::formation_preprocess()
         publish_trajectory_setpoint(velocity, _yaw);
 
 		RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000, "Try to switch to formation mode.");
+		update_sta_msg("switch to formation.");
 		return RESULT_WAITING;
 	}
 
 	// check list over.
+	update_sta_msg("Normal.");
 	return RESULT_SUCCESS;
 }
 
@@ -289,14 +299,14 @@ void MulticopterFormationControl::formation_exit()
 
     if (_is_emergency && uav_is_active())
     {
-        if (_vehicle_status.nav_state == VehicleStatus::NAVIGATION_STATE_OFFBOARD 
-            || !is_ignore_state(_vehicle_status.nav_state)) 
+        if (_vehicle_status.nav_state == VehicleStatus::NAVIGATION_STATE_OFFBOARD
+            || !is_ignore_state(_vehicle_status.nav_state))
         {
             // switch to hold mode
             publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 4, 3);
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *get_clock(), 1000, 
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *get_clock(), 1000,
                     "emergency: Try to switch to hold mode.");
-        } else 
+        } else
         {
             _is_emergency = false;
             RCLCPP_INFO(this->get_logger(), "emergency: Succeed in escaping from danger.");
@@ -304,7 +314,7 @@ void MulticopterFormationControl::formation_exit()
     }
 }
 
-void MulticopterFormationControl::formation_step() 
+void MulticopterFormationControl::formation_step()
 {
     parameters_update();
 	/* Run attitude controllers */
@@ -313,7 +323,7 @@ void MulticopterFormationControl::formation_step()
 	publish_trajectory_setpoint(_fms_out.velocity, _fms_out.yaw);
 }
 
-void MulticopterFormationControl::fms_step() 
+void MulticopterFormationControl::fms_step()
 {
     // control interval [ns]
     const uint64_t dt = _control_interval;
@@ -341,13 +351,13 @@ void MulticopterFormationControl::fms_step()
     }
     else if (_test_phase == PHASE_FORMATION)
     {
-        Matrix3d rel_x; 
-        rel_x << 0.0, -2.0, -2.0, 
-                2.0, 0.0, 0.0, 
+        Matrix3d rel_x;
+        rel_x << 0.0, -2.0, -2.0,
+                2.0, 0.0, 0.0,
                 2.0, 0.0, 0.0;
-        Matrix3d rel_y; 
-        rel_y << 0.0, -2.0, 2.0, 
-                2.0, 0.0, 4.0, 
+        Matrix3d rel_y;
+        rel_y << 0.0, -2.0, 2.0,
+                2.0, 0.0, 4.0,
                 -2.0, -4.0, 0.0;
         Matrix3d rel_z = Matrix3d::Zero();
         for (int i = 0; i < 3; i++)
@@ -359,7 +369,7 @@ void MulticopterFormationControl::fms_step()
         vel_sp += pos_err * 0.5;
         vel_sp[2] += -vh_cmd;
     }
-    
+
     // output limit
     vel_sp[0] = math::constrain(vel_sp[0], -0.5, 0.5);
     vel_sp[1] = math::constrain(vel_sp[1], -0.5, 0.5);
@@ -369,7 +379,7 @@ void MulticopterFormationControl::fms_step()
     _fms_out.velocity[1] = (float)vel_sp[1];
     _fms_out.velocity[2] = (float)vel_sp[2];
     _fms_out.yaw = (float)yaw_cmd;
-    
+
     if (_test_phase == PHASE_SINGLE)
     {
         RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 1000,
@@ -382,7 +392,7 @@ void MulticopterFormationControl::fms_step()
     }
 }
 
-void MulticopterFormationControl::publish_vehicle_command(uint32_t command, float param1, float param2, float param3, float param4, double param5, double param6, float param7) 
+void MulticopterFormationControl::publish_vehicle_command(uint32_t command, float param1, float param2, float param3, float param4, double param5, double param6, float param7)
 {
     VehicleCommand cmd{};
     cmd.command = command;
@@ -402,7 +412,7 @@ void MulticopterFormationControl::publish_vehicle_command(uint32_t command, floa
     _vehicle_command_pub->publish(cmd);
 }
 
-void MulticopterFormationControl::publish_trajectory_setpoint(float velocity[3], float yaw) 
+void MulticopterFormationControl::publish_trajectory_setpoint(float velocity[3], float yaw)
 {
     OffboardControlMode ocm{};
 	ocm.position = false;
@@ -443,12 +453,12 @@ void MulticopterFormationControl::handle_command(const form_msgs::msg::UavComman
 
 } // namespace formation
 
-int main(int argc, const char** argv) 
+int main(int argc, const char** argv)
 {
     int node_index = argc > 1 ? std::atoi(argv[1]) : 0;
 
     rclcpp::init(argc, argv);
-    
+
     rclcpp::spin(std::make_shared<formation::MulticopterFormationControl>(node_index, 40ms));
 
     rclcpp::shutdown();

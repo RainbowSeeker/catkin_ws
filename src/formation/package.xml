@@ -13,6 +13,7 @@
   <depend>rclcpp</depend>
   <depend>px4_msgs</depend>
   <depend>px4_ros_com</depend>
+  <depend>form_msgs</depend>
 
   <depend>launch</depend>
 
