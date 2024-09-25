@@ -28,6 +28,12 @@ public:
 
     void start()
     {
+        if (open_mavlinkv2())
+        {
+            throw std::runtime_error("Error opening MAVLink v2");
+        }
+        std::cout << "Opened MAVLink v2 successfully" << std::endl;
+
         do_read_serial();
 
         do_read_udp();
@@ -36,13 +42,47 @@ public:
     }
 
 private:
+    int open_mavlinkv2()
+    {
+        const char mavlinkv2[] = {(char)0xfd, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+        int retry = 10;
+        while (retry > 0)
+        {
+            int nwrite = _serial_port.write_some(buffer(mavlinkv2, sizeof(mavlinkv2)));
+            if (nwrite == sizeof(mavlinkv2))
+            {
+                break;
+            }
+            retry--;
+            usleep(100 * 1000);
+        }
+        if (retry == 0)
+        {
+            return -1;
+        }
+        retry = 100;
+        int wait_bytes = 100;
+        while (wait_bytes > 0 && retry > 0)
+        {
+            char buf[128];
+            int nread = _serial_port.read_some(buffer(buf, sizeof(buf)));
+            if (nread > 0)
+            {
+                wait_bytes -= nread;
+            }
+            retry--;
+            usleep(20 * 1000);
+        }
+        return retry > 0 ? 0 : -1;
+    }
+
     void do_read_serial()
     {
         _serial_port.async_read_some(buffer(_serial_data), [this](const boost::system::error_code &error, size_t bytes_transferred) {
             if (!error)
             {
                 auto buf = std::make_shared<std::vector<char>>(_serial_data.begin(), _serial_data.begin() + bytes_transferred);
-                _udp_socket.async_send_to(buffer(*buf), _udp_endpoint, [buf](const boost::system::error_code &error, size_t bytes_transferred) {
+                _udp_socket.async_send_to(buffer(*buf), _udp_endpoint, [buf](const boost::system::error_code &error, size_t) {
                     if (error)
                     {
                         throw std::runtime_error("Error sending data to UDP socket");
@@ -64,7 +104,7 @@ private:
             if (!error)
             {
                 auto buf = std::make_shared<std::vector<char>>(_udp_data.begin(), _udp_data.begin() + bytes_transferred);
-                async_write(_serial_port, buffer(*buf), [buf](const boost::system::error_code &error, size_t bytes_transferred) {
+                async_write(_serial_port, buffer(*buf), [buf](const boost::system::error_code &error, size_t) {
                     if (error)
                     {
                         throw std::runtime_error("Error writing data to serial port");
